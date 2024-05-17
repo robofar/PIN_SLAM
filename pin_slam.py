@@ -44,6 +44,7 @@ from utils.visualizer import MapVisualizer
 def run_pin_slam(config_path=None, dataset_name=None, sequence_name=None, seed=None):
 
     config = Config()
+    print(config.semantic_on)
     if config_path is not None:
         config.load(config_path)
         set_dataset_path(config, dataset_name, sequence_name)
@@ -112,6 +113,8 @@ def run_pin_slam(config_path=None, dataset_name=None, sequence_name=None, seed=N
         # I. Load data and preprocessing
         T0 = get_time()
 
+        # KITTI lidar does not contain timestamps for each ray in single scan. It has shape [N,4] (x,y,z,i/c)
+        # Q1: Does each scan in dataset has associated timestamp to it? Because of loop-closure detection or similar
         if config.use_kiss_dataloader:
             dataset.read_frame_with_loader(frame_id)
         else:
