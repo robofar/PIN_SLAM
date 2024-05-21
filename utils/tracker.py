@@ -39,10 +39,10 @@ class Tracker:
 
         self.sdf_scale = config.logistic_gaussian_ratio * config.sigma_sigmoid_m
 
-    # already under the scaled coordinate system
+    # already under the scaled coordinate system (source_points => PC for registration)
     def tracking(
         self,
-        source_points,
+        source_points, # PC for registration (after double-downsampling)
         init_pose=None,
         source_colors=None,
         source_normals=None,
@@ -92,8 +92,9 @@ class Tracker:
         source_point_count = source_points.shape[0]
 
         if not self.silence:
-            print("# Source point for registeration :", source_point_count)
+            print("# Source point for registration :", source_point_count)
 
+        # ideally all points from source PC should have sdf=0, if PC perfectly align onto scene
         if source_sdf is None:  # only use the surface samples (all zero)
             source_sdf = torch.zeros(source_point_count, device=self.device)
 
@@ -101,10 +102,13 @@ class Tracker:
 
             T01 = get_time()
 
-            cur_points = transform_torch(source_points, T)  # apply transformation
+            cur_points = transform_torch(source_points, T)  # apply transformation. Transform PC from lidar frame to world frame
 
             T02 = get_time()
 
+            
+            # Perfect registration: Sum(sdf(x_i)) = 0.0
+            # Trying to minimize sdf loss wrt to the pose T
             reg_result = self.registration_step(
                 cur_points,
                 source_normals,
@@ -354,7 +358,7 @@ class Tracker:
         self,
         points: torch.Tensor,
         normals: torch.Tensor,
-        sdf_labels: torch.Tensor,
+        sdf_labels: torch.Tensor, # = sdf_source all zeros
         colors: torch.Tensor,
         min_grad_norm,
         max_grad_norm,
@@ -368,6 +372,7 @@ class Tracker:
 
         colors_on = colors is not None
         photo_loss_on = self.config.photometric_loss_on and colors_on
+
         (
             sdf_pred,
             sdf_grad,
@@ -388,6 +393,12 @@ class Tracker:
             mask_min_nn_count=self.config.track_mask_query_nn_k,
         )  # fixme
 
+        ############# Check sum ######################
+        #print(torch.sum(sdf_pred))
+        #print("==================================")
+
+
+        ##############################################
         T1 = get_time()
 
         grad_norm = sdf_grad.norm(dim=-1, keepdim=True).squeeze()  # unit: m
@@ -441,6 +452,11 @@ class Tracker:
             sdf_pred = sdf_pred / grad_norm
 
         sdf_residual = sdf_pred - sdf_labels
+        # sdf_pred is same as sdf_residual cuz sdf_labels are all 0
+        #print(sdf_labels)
+        #print(sdf_pred)
+        #print(sdf_residual)
+        #print("================")
 
         sdf_residual_mean_cm = torch.mean(torch.abs(sdf_residual)).item() * 100.0
 

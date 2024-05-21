@@ -12,3 +12,6 @@ eval:
   sensor_cad_path: ./cad/kitti_car.ply
   save_map: True
   save_mesh: True
+pgo:
+  pgo_freq_frame: 20
+  context_cosdist: 0.3

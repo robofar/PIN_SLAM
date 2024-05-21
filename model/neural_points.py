@@ -89,6 +89,7 @@ class NeuralPoints(nn.Module):
         )
 
         self.neural_points = torch.empty((0, 3), dtype=self.dtype, device=self.device)
+        
         self.point_orientations = torch.empty(
             (0, 4), dtype=self.dtype, device=self.device
         )  # as quaternion
@@ -287,7 +288,7 @@ class NeuralPoints(nn.Module):
         points: torch.Tensor,
         sensor_position: torch.Tensor,
         sensor_orientation: torch.Tensor,
-        cur_ts,
+        cur_ts
     ):
         # update the neural point map using new observations
 
@@ -295,8 +296,10 @@ class NeuralPoints(nn.Module):
         # if self.mean_grid_sampling:
         #     sample_points = meanGridSampling(points, resolution=cur_resolution)
         # take the point that is the closest to the voxel center (now used)
+
+        # 1: Points are first downsampled
         sample_idx = voxel_down_sample_torch(points, cur_resolution)
-        sample_points = points[sample_idx]
+        sample_points = points[sample_idx] 
 
         grid_coords = (sample_points / cur_resolution).floor().to(self.primes)
         buffer_size = int(self.buffer_size)
@@ -327,7 +330,9 @@ class NeuralPoints(nn.Module):
                 hash_idx.shape, dtype=torch.bool, device=self.device
             )
 
-        added_pt = sample_points[update_mask]
+        # 2: Some points are now masked out. And those are new points that will be added to the map
+        # i.e. that will be added to self.neural_points tensor
+        added_pt = sample_points[update_mask] #################################
         new_point_count = added_pt.shape[0]
 
         cur_pt_idx = self.buffer_pt_index[hash]
@@ -340,7 +345,8 @@ class NeuralPoints(nn.Module):
 
         # torch.cat could be slow for large map
         self.buffer_pt_index[hash] = cur_pt_idx
-        self.neural_points = torch.cat((self.neural_points, added_pt), 0)
+        self.neural_points = torch.cat((self.neural_points, added_pt), 0) # new points are added to the map
+
 
         added_orientations = [[1, 0, 0, 0]] * new_point_count
         added_orientations = torch.tensor(
@@ -383,6 +389,9 @@ class NeuralPoints(nn.Module):
         self.reset_local_map(
             sensor_position, sensor_orientation, cur_ts
         )  # no need to recreate hash
+
+
+        return added_pt # foe creating new Gaussians
 
     def reset_local_map(
         self,

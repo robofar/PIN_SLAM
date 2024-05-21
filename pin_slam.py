@@ -12,11 +12,13 @@ import torch
 import wandb
 from rich import print
 from tqdm import tqdm
+from munch import munchify # for YAML files to acces keys using . operator
 
 from dataset.dataset_indexing import set_dataset_path
 from dataset.slam_dataset import SLAMDataset
 from model.decoder import Decoder
 from model.neural_points import NeuralPoints
+from model.gaussians import GaussianModel
 from utils.config import Config
 from utils.loop_detector import (
     NeuralPointMapContextManager,
@@ -37,6 +39,10 @@ from utils.tools import (
 from utils.tracker import Tracker
 from utils.visualizer import MapVisualizer
 
+
+################# GS imports #######################
+from gaussian_splatting.utils.config_utils import load_config
+
 '''
     📍PIN-SLAM: LiDAR SLAM Using a Point-Based Implicit Neural Representation for Achieving Global Map Consistency
      Y. Pan et al.
@@ -44,7 +50,6 @@ from utils.visualizer import MapVisualizer
 def run_pin_slam(config_path=None, dataset_name=None, sequence_name=None, seed=None):
 
     config = Config()
-    print(config.semantic_on)
     if config_path is not None:
         config.load(config_path)
         set_dataset_path(config, dataset_name, sequence_name)
@@ -59,12 +64,12 @@ def run_pin_slam(config_path=None, dataset_name=None, sequence_name=None, seed=N
             sys.exit("Please provide the path to the config file.\nTry: \
                     python3 pin_slam.py path_to_config.yaml [dataset_name] [sequence_name] [random_seed]")       
         # specific dataset [optional]
-        if len(sys.argv) == 3:
-            set_dataset_path(config, sys.argv[2])
-        if len(sys.argv) > 3:
-            set_dataset_path(config, sys.argv[2], sys.argv[3])
-        if len(sys.argv) > 4: # random seed [optional]
-            config.seed = int(sys.argv[4])
+        if len(sys.argv) == 4:
+            set_dataset_path(config, sys.argv[3])
+        if len(sys.argv) > 4:
+            set_dataset_path(config, sys.argv[3], sys.argv[4])
+        if len(sys.argv) > 5: # random seed [optional]
+            config.seed = int(sys.argv[5])
         run_path = setup_experiment(config, sys.argv)
         print("[bold green]PIN-SLAM starts[/bold green]","📍" )
 
@@ -80,6 +85,19 @@ def run_pin_slam(config_path=None, dataset_name=None, sequence_name=None, seed=N
     # initialize the feature octree
     neural_points = NeuralPoints(config)
 
+    ############################ Gaussian Setup ##############################################
+    gs_config = load_config(sys.argv[2])
+
+    model_params = munchify(gs_config["model_params"])
+    opt_params = munchify(gs_config["opt_params"])
+    pipeline_params = munchify(gs_config["pipeline_params"])
+
+    gaussians = GaussianModel(sh_degree=0, config=gs_config, isotropic=True)
+    gaussians.init_lr(6.0)
+    gaussians.training_setup(opt_params)
+
+    ##########################################################################################
+
     # Load the decoder model
     if config.load_model: # not used
         load_decoder(config, geo_mlp, sem_mlp, color_mlp)
@@ -91,7 +109,7 @@ def run_pin_slam(config_path=None, dataset_name=None, sequence_name=None, seed=N
     tracker = Tracker(config, neural_points, geo_mlp, sem_mlp, color_mlp)
 
     # mapper
-    mapper = Mapper(config, dataset, neural_points, geo_mlp, sem_mlp, color_mlp)
+    mapper = Mapper(config, dataset, neural_points, gaussians, geo_mlp, sem_mlp, color_mlp)
 
     # mesh reconstructor
     mesher = Mesher(config, neural_points, geo_mlp, sem_mlp, color_mlp)
@@ -106,7 +124,10 @@ def run_pin_slam(config_path=None, dataset_name=None, sequence_name=None, seed=N
 
     last_frame = dataset.total_pc_count-1
     loop_reg_failed_count = 0
-        
+
+
+    #sys.exit(0)
+
     # for each frame
     for frame_id in tqdm(range(dataset.total_pc_count)): # frame id as the processed frame, possible skipping done in data loader
 
@@ -167,7 +188,7 @@ def run_pin_slam(config_path=None, dataset_name=None, sequence_name=None, seed=N
                 else: # first frame not yet have local map, use scan context
                     lcd_npmc.add_node(frame_id, dataset.cur_point_cloud_torch)
             pgm.add_frame_node(frame_id, dataset.pgo_poses[frame_id]) # add new node and pose initial guess
-            pgm.init_poses = dataset.pgo_poses[:frame_id+1]
+            pgm.init_poses = dataset.pgo_poses[:frame_id+1] # pose initial guess
             if frame_id > 0:
                 cur_edge_cov = cur_odom_cov if config.use_reg_cov_mat else None
                 pgm.add_odometry_factor(frame_id, frame_id-1, dataset.last_odom_tran, cov = cur_edge_cov) # T_p<-c
@@ -245,7 +266,13 @@ def run_pin_slam(config_path=None, dataset_name=None, sequence_name=None, seed=N
         else:
             mapper.determine_used_pose()
             neural_points.reset_local_map(dataset.cur_pose_torch[:3,3], None, frame_id) # not efficient for large map
-                                
+
+        print("Neural points After: ", mapper.neural_points.neural_points.shape)
+        print("3D Gaussians After: ", mapper.gaussians.get_xyz().shape)
+        print("===========================================================")
+        if(frame_id > 0):
+            sys.exit(0)
+
         T5 = get_time()
 
         # for the first frame, we need more iterations to do the initialization (warm-up)

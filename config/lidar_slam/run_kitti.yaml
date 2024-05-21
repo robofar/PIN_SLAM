@@ -1,9 +1,9 @@
 setting:
   name: "test_kitti"
   output_root: "./experiments"
-  pc_path: "./data/kitti/sequences/00/velodyne"
-  pose_path: "./data/kitti/poses/00.txt"
-  calib_path: "./data/kitti/sequences/00/calib.txt"
+  pc_path: "./data/kitti/sequences/01/velodyne"
+  pose_path: "./data/kitti/poses/01.txt"
+  calib_path: "./data/kitti/sequences/01/calib.txt"
   kitti_correct: True
   correct_deg: 0.195
 process:

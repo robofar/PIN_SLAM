@@ -19,6 +19,7 @@ from tqdm import tqdm
 from dataset.slam_dataset import SLAMDataset
 from model.decoder import Decoder
 from model.neural_points import NeuralPoints
+from model.gaussians import GaussianModel
 from utils.config import Config
 from utils.data_sampler import DataSampler
 from utils.loss import color_diff_loss, sdf_bce_loss, sdf_diff_loss, sdf_zhong_loss
@@ -37,6 +38,7 @@ class Mapper:
         config: Config,
         dataset: SLAMDataset,
         neural_points: NeuralPoints,
+        gaussians: GaussianModel,
         geo_mlp: Decoder,
         sem_mlp: Decoder,
         color_mlp: Decoder,
@@ -46,6 +48,7 @@ class Mapper:
         self.silence = config.silence
         self.dataset = dataset
         self.neural_points = neural_points
+        self.gaussians = gaussians
         self.geo_mlp = geo_mlp
         self.sem_mlp = sem_mlp
         self.color_mlp = color_mlp
@@ -253,9 +256,17 @@ class Mapper:
         if self.config.prune_map_on and ((frame_id + 1) % self.config.prune_freq_frame == 0):
             if self.neural_points.prune_map(self.config.max_prune_certainty):
                 self.neural_points.recreate_hash(None, None, True, True, frame_id)
-        self.neural_points.update(
+        
+        print("Neural Points Before: ", self.neural_points.neural_points.shape)
+        print("3D Gaussians Before: ", self.gaussians.get_xyz().shape)
+
+        added_pt = self.neural_points.update(
             update_points, frame_origin_torch, frame_orientation_torch, frame_id
         )
+
+        print("Number of added points: ", added_pt.shape)
+        self.gaussians.add_points(added_pt, 2)
+
         # local map is also updated here
 
         if not self.silence:

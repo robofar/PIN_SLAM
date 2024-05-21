@@ -115,6 +115,8 @@ class SLAMDataset(Dataset):
                     config.local_map_context = True
         
         # use pre-allocated numpy array
+        # odom_poses => poses stored only from odometry (for later comparison or similar)
+        # so when LC and PGO happens this array will not be updated
         self.odom_poses = None
         if config.track_on:
             self.odom_poses = np.broadcast_to(np.eye(4), (max_frame_number, 4, 4)).copy()
@@ -133,9 +135,11 @@ class SLAMDataset(Dataset):
         self.color_available: bool = False
         self.intensity_available: bool = False
         self.color_scale: float = 255.0
+
         self.last_pose_ref = np.eye(4)
         self.last_odom_tran = np.eye(4)
         self.cur_pose_ref = np.eye(4)
+
         # count the consecutive stop frame of the robot
         self.stop_count: int = 0
         self.stop_status = False
@@ -157,13 +161,13 @@ class SLAMDataset(Dataset):
 
         self.static_mask = None
 
-        # current frame's data
+        # current frame's data (will be downsampled and filtered)
         self.cur_point_cloud_torch = None
         self.cur_point_ts_torch = None
         self.cur_sem_labels_torch = None
         self.cur_sem_labels_full = None
 
-        # source data for registration
+        # source data for registration (will be downsampled from self.cur_point_cloud_torch after its downsampling)
         self.cur_source_points = None
         self.cur_source_normals = None
         self.cur_source_colors = None
@@ -317,7 +321,8 @@ class SLAMDataset(Dataset):
         # T1 = get_time()
         # poses related
         frame_id = self.processed_frame
-        cur_pose_init_guess = self.cur_pose_ref
+
+        ############ Frame pose initial guess => self.cur_pose_guess_torch ############
         if frame_id == 0:  # initialize the first frame, no tracking yet
             if self.config.track_on:
                 self.odom_poses[frame_id] = self.cur_pose_ref
@@ -357,6 +362,13 @@ class SLAMDataset(Dataset):
         else:
             crop_max_range = self.config.max_range
 
+
+        ########### Frame PC processing and downsampling ############
+        # 0. Original Frame PC (self.cur_point_cloud_torch)
+        # 1. Downsampling using train_voxel_m (self.cur_point_cloud_torch affected)
+        # 2. Filtering a bit (self.cur_point_cloud_torch affected)
+        # 3. Downsampling using source_voxel_m (self.cur_source_points affected)
+
         # adaptive
         train_voxel_m = (
             crop_max_range / self.config.max_range
@@ -375,6 +387,7 @@ class SLAMDataset(Dataset):
                 self.pgo_poses[frame_id] = cur_pose_init_guess
             return False
 
+        # step 1
         if self.config.rand_downsample:
             kept_count = int(original_count * self.config.rand_down_r)
             idx = torch.randint(0, original_count, (kept_count,), device=self.device)
@@ -382,7 +395,9 @@ class SLAMDataset(Dataset):
             idx = voxel_down_sample_torch(
                 self.cur_point_cloud_torch[:, :3], train_voxel_m
             )
-        self.cur_point_cloud_torch = self.cur_point_cloud_torch[idx]
+        
+        self.cur_point_cloud_torch = self.cur_point_cloud_torch[idx] # step 1
+        
         if self.cur_point_ts_torch is not None:
             self.cur_point_ts_torch = self.cur_point_ts_torch[idx]
         if self.cur_sem_labels_torch is not None:
@@ -390,8 +405,7 @@ class SLAMDataset(Dataset):
             self.cur_sem_labels_full = self.cur_sem_labels_full[idx]
 
         # T2 = get_time()
-
-        # preprocessing, filtering
+        # preprocessing, filtering (step 2)
         if self.cur_sem_labels_torch is not None:
             self.cur_point_cloud_torch, self.cur_sem_labels_torch = filter_sem_kitti(
                 self.cur_point_cloud_torch,
@@ -424,9 +438,10 @@ class SLAMDataset(Dataset):
                 self.cur_point_cloud_torch.clone()
             )  # used for registration
 
-            # source point voxel downsampling (for registration)
+            # source point cloud voxel downsampling (for registration) (step 3)
             idx = voxel_down_sample_torch(cur_source_torch[:, :3], source_voxel_m)
             cur_source_torch = cur_source_torch[idx]
+            
             self.cur_source_points = cur_source_torch[:, :3]
             if self.config.color_on:
                 self.cur_source_colors = cur_source_torch[:, 3:]
@@ -437,7 +452,7 @@ class SLAMDataset(Dataset):
             else:
                 cur_source_ts = None
 
-            # deskewing (motion undistortion) for source point cloud
+            # deskewing (motion undistortion) for source point cloud (only if scan has ts for each ray in scan)
             if self.config.deskew and not self.lose_track:
                 self.cur_source_points = deskewing(
                     self.cur_source_points,
@@ -479,7 +494,7 @@ class SLAMDataset(Dataset):
         else:
             self.stop_status = False
 
-        if self.config.pgo_on:  # initialize the pgo pose
+        if self.config.pgo_on:  # initialize the pgo pose (pose estimated by tracker)
             self.pgo_poses[cur_frame_id] = self.cur_pose_ref
 
         if self.odom_poses is not None:
@@ -519,6 +534,7 @@ class SLAMDataset(Dataset):
             sys.exit("Lose track for a long time, system failed") 
 
     def update_poses_after_pgo(self, pgo_cur_pose, pgo_poses):
+        print("USAO U def update_poses_after_pgo")
         self.cur_pose_ref = pgo_cur_pose
         self.last_pose_ref = pgo_cur_pose  # update for next frame
         self.pgo_poses[:self.processed_frame+1] = pgo_poses  # update pgo pose

@@ -450,7 +450,7 @@ class Config:
         # pgo
         if self.track_on:
             self.pgo_on = config_args.get("pgo", False) # only on if indicated
-        if self.pgo_on: 
+        if self.pgo_on:
             self.local_map_context = config_args["pgo"].get("map_context", self.local_map_context)
             self.loop_with_feature = config_args["pgo"].get("loop_with_feature", self.loop_with_feature)
             self.local_map_context_latency = config_args["pgo"].get('local_map_latency', self.local_map_context_latency)
