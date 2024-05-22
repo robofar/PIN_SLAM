@@ -1,0 +1,6 @@
+inherit_from: "gaussian_splatting/configs/base_kitti.yaml"
+
+Dataset:
+  dataset_path: "data/kitti/sequences/01/image_2/"
+  poses_path: "data/kitti/sequences/01/01.txt"
+  calibration_path: "data/kitti/sequences/01/calib.txt"
