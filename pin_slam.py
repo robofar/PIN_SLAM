@@ -42,6 +42,7 @@ from utils.visualizer import MapVisualizer
 
 ################# GS imports #######################
 from gaussian_splatting.utils.config_utils import load_config
+from dataset.image_datasets import load_dataset
 
 '''
     📍PIN-SLAM: LiDAR SLAM Using a Point-Based Implicit Neural Representation for Achieving Global Map Consistency
@@ -102,8 +103,22 @@ def run_pin_slam(config_path=None, dataset_name=None, sequence_name=None, seed=N
     if config.load_model: # not used
         load_decoder(config, geo_mlp, sem_mlp, color_mlp)
 
-    # dataset
+    # dataset (lidar)
     dataset = SLAMDataset(config)
+
+    # dataset (images)
+    dataset_rgb = load_dataset(gs_config)
+    print(dataset_rgb.num_frames)
+    print(dataset_rgb.color_paths[0])
+    print(dataset_rgb.color_paths[1])
+    print(dataset_rgb.color_paths[24])
+    print(dataset_rgb.poses[0])
+    print(dataset_rgb.poses[10])
+    print("===============================================")
+
+
+
+    sys.exit(0)
 
     # odometry tracker
     tracker = Tracker(config, neural_points, geo_mlp, sem_mlp, color_mlp)
@@ -270,7 +285,7 @@ def run_pin_slam(config_path=None, dataset_name=None, sequence_name=None, seed=N
         print("Neural points After: ", mapper.neural_points.neural_points.shape)
         print("3D Gaussians After: ", mapper.gaussians.get_xyz().shape)
         print("===========================================================")
-        if(frame_id > 0):
+        if(frame_id > 4):
             sys.exit(0)
 
         T5 = get_time()
